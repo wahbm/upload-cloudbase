@@ -1,0 +1,24 @@
+[Unit]
+Description=CloudBase public file proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/var/www/mosshqq/upload-cloudbase/current
+EnvironmentFile=-/var/www/mosshqq/upload-cloudbase/shared/app.env
+ExecStart=/usr/bin/env node /var/www/mosshqq/upload-cloudbase/current/dist/src/server.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/mosshqq/upload-cloudbase
+
+[Install]
+WantedBy=multi-user.target

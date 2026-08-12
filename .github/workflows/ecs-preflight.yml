@@ -1,0 +1,71 @@
+name: ECS preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          eval "$(ssh-agent -a /tmp/ssh-agent.sock)"
+          printf '%s\n' "$SSH_PRIVATE_KEY" | SSH_AUTH_SOCK=/tmp/ssh-agent.sock ssh-add -
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh-agent.sock
+
+      - name: Inspect ECS without changing it
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          SSH_AUTH_SOCK: /tmp/ssh-agent.sock
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -u
+          echo '--- identity ---'
+          id
+          hostname
+          echo '--- operating system ---'
+          if [ -r /etc/os-release ]; then . /etc/os-release; echo "$PRETTY_NAME"; fi
+          echo '--- resources ---'
+          free -h || true
+          df -h / || true
+          echo '--- runtimes ---'
+          command -v node && node --version || echo 'node: missing'
+          command -v pnpm && pnpm --version || echo 'pnpm: missing'
+          command -v nginx && nginx -v 2>&1 || echo 'nginx: missing'
+          echo '--- service manager ---'
+          command -v systemctl && systemctl --version | head -1 || echo 'systemctl: missing'
+          sudo -n -v >/dev/null 2>&1 && echo 'passwordless sudo: yes' || echo 'passwordless sudo: no'
+          echo '--- listeners ---'
+          ss -ltn 2>/dev/null || true
+          echo '--- deployment path ---'
+          if [ -d /var/www/mosshqq/upload-cloudbase ]; then
+            ls -ld /var/www/mosshqq/upload-cloudbase
+            find /var/www/mosshqq/upload-cloudbase -maxdepth 2 -type f -printf '%p\n' 2>/dev/null | head -30 || true
+          else
+            echo 'deployment path: absent'
+          fi
+          echo '--- relevant nginx config ---'
+          if [ -d /etc/nginx ]; then
+            sudo -n nginx -T 2>/dev/null | grep -E 'listen |server_name |cloudbase|upload-cloudbase' | head -80 || true
+          else
+            echo 'nginx config: absent'
+          fi
+          echo '--- target service ---'
+          sudo -n systemctl status cloudbase-public-file-proxy.service --no-pager 2>&1 || true
+REMOTE

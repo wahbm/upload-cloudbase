@@ -1,0 +1,210 @@
+openapi: 3.1.0
+info:
+  title: CloudBase Public File Proxy API
+  version: 1.0.0
+  description: |
+    A public, project-namespaced proxy for CloudBase PG Storage.
+    The proxy only handles public files in the configured public-assets bucket.
+servers:
+  - url: http://localhost:8787
+    description: Local development
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service health
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, storageConfigured]
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: cloudbase-public-file-proxy }
+                  storageConfigured: { type: boolean }
+  /v1/files:
+    post:
+      summary: Upload a new public file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [projectId, scope, file]
+              properties:
+                projectId: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+                scope: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: File uploaded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileResponse' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '413': { $ref: '#/components/responses/FileTooLarge' }
+    get:
+      summary: List files under a project namespace
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+        - in: query
+          name: scope
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200':
+          description: Page of files
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [files]
+                    properties:
+                      files:
+                        type: array
+                        items: { $ref: '#/components/schemas/FileRef' }
+                      cursor: { type: string }
+  /v1/files/{projectId}/{scope}/{objectName}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectIdPath' }
+      - { $ref: '#/components/parameters/ScopePath' }
+      - in: path
+        name: objectName
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}\.[A-Za-z0-9]{1,16}$' }
+    get:
+      summary: Get file metadata
+      responses:
+        '200':
+          description: File metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Replace an existing file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                projectId: { type: string }
+                scope: { type: string }
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: File replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileResponse' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a file
+      responses:
+        '204': { description: File deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/files/{projectId}/{scope}/{objectName}/content:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectIdPath' }
+      - { $ref: '#/components/parameters/ScopePath' }
+      - in: path
+        name: objectName
+        required: true
+        schema: { type: string }
+    get:
+      summary: Stream file content through this service
+      parameters:
+        - in: query
+          name: download
+          schema: { type: string, enum: ['1', 'true'] }
+        - in: header
+          name: Range
+          schema: { type: string, example: bytes=0-1023 }
+      responses:
+        '200':
+          description: File content
+          headers:
+            Accept-Ranges: { schema: { type: string } }
+            Content-Length: { schema: { type: integer } }
+            ETag: { schema: { type: string } }
+          content:
+            application/octet-stream: { schema: { type: string, format: binary } }
+        '206': { description: Partial file content }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  parameters:
+    ProjectId:
+      in: query
+      name: projectId
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+    ProjectIdPath:
+      in: path
+      name: projectId
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+    ScopePath:
+      in: path
+      name: scope
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
+  schemas:
+    FileRef:
+      type: object
+      required: [bucketId, path, projectId, scope, visibility, originalName, mimeType, sizeBytes, contentUrl, downloadUrl]
+      properties:
+        bucketId: { type: string, example: public-assets }
+        path: { type: string, example: projects/shop/product-covers/550e8400-e29b-41d4-a716-446655440000.jpg }
+        projectId: { type: string }
+        scope: { type: string }
+        visibility: { type: string, enum: [public] }
+        originalName: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        contentUrl: { type: string, format: uri }
+        downloadUrl: { type: string, format: uri }
+    FileResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/FileRef' }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+  responses:
+    InvalidRequest:
+      description: Invalid request or file
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } }
+    FileTooLarge:
+      description: File exceeds the configured limit
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } }
+    NotFound:
+      description: File not found
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } }
