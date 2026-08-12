@@ -49,6 +49,8 @@ jobs:
           echo '--- service manager ---'
           command -v systemctl && systemctl --version | head -1 || echo 'systemctl: missing'
           sudo -n -v >/dev/null 2>&1 && echo 'passwordless sudo: yes' || echo 'passwordless sudo: no'
+          echo '--- sudo policy ---'
+          sudo -n -l 2>&1 || true
           echo '--- listeners ---'
           ss -ltn 2>/dev/null || true
           echo '--- deployment path ---'

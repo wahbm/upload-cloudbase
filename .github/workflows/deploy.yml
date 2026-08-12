@@ -77,8 +77,13 @@ jobs:
           set -euo pipefail
           release_id="${GITHUB_SHA}"
           remote_tar="${DEPLOY_PATH}/releases/${release_id}.tar.gz"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "mkdir -p '$DEPLOY_PATH/releases' '$DEPLOY_PATH/shared'"
+          if [ "$BOOTSTRAP" = 'true' ]; then
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "sudo -n install -d -o deploy -g deploy -m 0755 '$DEPLOY_PATH/releases' '$DEPLOY_PATH/shared'"
+          else
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "test -d '$DEPLOY_PATH' && test -d '$DEPLOY_PATH/releases' && test -d '$DEPLOY_PATH/shared'"
+          fi
           scp -o BatchMode=yes -o StrictHostKeyChecking=yes -P "$DEPLOY_PORT" release.tar.gz \
             "$DEPLOY_USER@$DEPLOY_HOST:$remote_tar"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
@@ -89,6 +94,12 @@ jobs:
           bootstrap="$3"
           release_dir="$deploy_path/releases/$release_id"
 
+          if [ "$bootstrap" = 'true' ]; then
+            sudo -n install -d -o deploy -g deploy -m 0755 "$deploy_path/releases" "$deploy_path/shared"
+          elif [ ! -d "$deploy_path" ]; then
+            echo 'deployment path is absent; rerun with bootstrap=true after ECS preflight' >&2
+            exit 1
+          fi
           mkdir -p "$release_dir"
           tar -xzf "$deploy_path/releases/$release_id.tar.gz" -C "$release_dir"
           ln -sfn "$release_dir" "$deploy_path/current"
