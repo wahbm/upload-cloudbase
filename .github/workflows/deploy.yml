@@ -4,12 +4,6 @@ name: Deploy to Alibaba Cloud ECS
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      bootstrap:
-        description: Install or refresh the systemd service and Nginx IP proxy (requires passwordless sudo)
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -37,8 +31,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm install --prod --frozen-lockfile
       - name: Package release
-        run: tar -czf release.tar.gz dist package.json pnpm-lock.yaml deploy
+        run: tar -czf release.tar.gz dist node_modules package.json pnpm-lock.yaml deploy
       - uses: actions/upload-artifact@v4
         with:
           name: release
@@ -71,33 +66,24 @@ jobs:
           DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
-          BOOTSTRAP: ${{ inputs.bootstrap || 'false' }}
           SSH_AUTH_SOCK: /tmp/ssh-agent.sock
         run: |
           set -euo pipefail
           release_id="${GITHUB_SHA}"
           remote_tar="${DEPLOY_PATH}/releases/${release_id}.tar.gz"
-          if [ "$BOOTSTRAP" = 'true' ]; then
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "sudo -n install -d -o deploy -g deploy -m 0755 '$DEPLOY_PATH/releases' '$DEPLOY_PATH/shared'"
-          else
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "test -d '$DEPLOY_PATH' && test -d '$DEPLOY_PATH/releases' && test -d '$DEPLOY_PATH/shared'"
-          fi
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "test -d '$DEPLOY_PATH' && test -d '$DEPLOY_PATH/releases' && test -d '$DEPLOY_PATH/shared'"
           scp -o BatchMode=yes -o StrictHostKeyChecking=yes -P "$DEPLOY_PORT" release.tar.gz \
             "$DEPLOY_USER@$DEPLOY_HOST:$remote_tar"
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "bash -s -- '$DEPLOY_PATH' '$release_id' '$BOOTSTRAP'" <<'REMOTE'
+            "bash -s -- '$DEPLOY_PATH' '$release_id'" <<'REMOTE'
           set -euo pipefail
           deploy_path="$1"
           release_id="$2"
-          bootstrap="$3"
           release_dir="$deploy_path/releases/$release_id"
 
-          if [ "$bootstrap" = 'true' ]; then
-            sudo -n install -d -o deploy -g deploy -m 0755 "$deploy_path/releases" "$deploy_path/shared"
-          elif [ ! -d "$deploy_path" ]; then
-            echo 'deployment path is absent; rerun with bootstrap=true after ECS preflight' >&2
+          if [ ! -d "$deploy_path" ]; then
+            echo 'deployment path is absent; run deploy/workbench-bootstrap.sh in ECS Workbench first' >&2
             exit 1
           fi
           mkdir -p "$release_dir"
@@ -109,29 +95,7 @@ jobs:
             install -m 0600 deploy/app.env.example "$deploy_path/shared/app.env"
           fi
 
-          if [ "$bootstrap" = 'true' ]; then
-            if ! sudo -n -v >/dev/null 2>&1; then
-              echo 'bootstrap requested but passwordless sudo is unavailable' >&2
-              exit 1
-            fi
-            sudo -n install -o root -g root -m 0644 \
-              "$release_dir/deploy/systemd/cloudbase-public-file-proxy.service" \
-              /etc/systemd/system/cloudbase-public-file-proxy.service
-            sudo -n install -o root -g root -m 0644 \
-              "$release_dir/deploy/nginx/cloudbase-public-file-proxy.conf" \
-              /etc/nginx/conf.d/cloudbase-public-file-proxy.conf
-            sudo -n nginx -t
-            sudo -n systemctl daemon-reload
-            sudo -n systemctl enable cloudbase-public-file-proxy.service
-            sudo -n systemctl reload nginx
-          fi
-
-          if sudo -n systemctl is-enabled cloudbase-public-file-proxy.service >/dev/null 2>&1; then
-            sudo -n systemctl restart cloudbase-public-file-proxy.service
-          else
-            echo 'target systemd service is not installed; rerun with bootstrap=true after ECS preflight' >&2
-            exit 1
-          fi
+          sudo -n systemctl restart cloudbase-public-file-proxy.service
 
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if curl --fail --silent --show-error http://127.0.0.1:8787/healthz; then
@@ -139,6 +103,5 @@ jobs:
             fi
             sleep 2
           done
-          sudo -n systemctl status cloudbase-public-file-proxy.service --no-pager || true
           exit 1
           REMOTE

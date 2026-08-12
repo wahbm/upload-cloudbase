@@ -103,16 +103,15 @@ pnpm build
 
 仓库包含 GitHub Actions 部署配置：`.github/workflows/ecs-preflight.yml` 用于只读检查 ECS，`.github/workflows/deploy.yml` 用于构建并发布到 ECS。部署使用组织级 SSH 变量和密钥，不会把 CloudBase `service_role` 写入仓库或 GitHub Actions 日志。
 
-当前部署目标使用裸 IP `8.130.116.192`，默认发布目录为 `/var/www/mosshqq/upload-cloudbase`。首次配置前先手动运行 `ECS preflight`，确认 Node.js 20、Nginx、systemd、磁盘空间、端口 80 和 passwordless sudo 状态；确认 Nginx 没有占用该 IP 后，再运行 `Deploy to Alibaba Cloud ECS` 并将 `bootstrap` 设为 `true`。后续发布可以直接推送 `main`。
+当前部署目标使用裸 IP `8.130.116.192`，默认发布目录为 `/var/www/mosshqq/upload-cloudbase`。首次配置前先手动运行 `ECS preflight`，确认 Node.js、Nginx、systemd、磁盘空间和端口 80 状态。由于当前 `deploy` 用户只被授权重启本服务，首次安装 systemd/Nginx 配置需要在 ECS Workbench 以 root 执行 `deploy/workbench-bootstrap.sh`；完成后，后续发布可以直接推送 `main`。
 
-首次发布会创建 `shared/app.env`，但出于安全原因不会自动生成或传输 CloudBase 密钥。请在 ECS Workbench 中将 `deploy/app.env.example` 复制为该文件，填入 `CLOUDBASE_SERVICE_ROLE_KEY`，并保持文件权限为 `0600`。服务读取的变量包括：
+首次 bootstrap 会创建 `shared/app.env`，但出于安全原因不会自动生成或传输 CloudBase 密钥。请在 ECS Workbench 中填入 `CLOUDBASE_SERVICE_ROLE_KEY`，并保持文件权限为 `0600`。服务读取的变量包括：
 
 ```bash
-sudo -u deploy install -m 0600 \
-  /var/www/mosshqq/upload-cloudbase/current/deploy/app.env.example \
-  /var/www/mosshqq/upload-cloudbase/shared/app.env
+git clone https://github.com/wahbm/upload-cloudbase.git /tmp/upload-cloudbase
+sudo DEPLOY_PATH=/var/www/mosshqq/upload-cloudbase \
+  /tmp/upload-cloudbase/deploy/workbench-bootstrap.sh
 sudo -u deploy editor /var/www/mosshqq/upload-cloudbase/shared/app.env
-sudo systemctl restart cloudbase-public-file-proxy.service
 ```
 
-密钥配置完成后，使用 `http://8.130.116.192/healthz` 验证服务；健康响应中的 `storageConfigured` 应为 `true`。如果 ECS 上已有其他 Nginx 站点，请先调整 `deploy/nginx/cloudbase-public-file-proxy.conf` 的路由，避免覆盖或抢占现有服务。
+bootstrap 和密钥配置完成后，手动运行一次 `Deploy to Alibaba Cloud ECS`，再使用 `http://8.130.116.192/healthz` 验证服务；健康响应中的 `storageConfigured` 应为 `true`。如果 ECS 上已有其他 Nginx 站点，bootstrap 脚本会在检测到同 IP 路由冲突时停止，请先调整 `deploy/nginx/cloudbase-public-file-proxy.conf` 的路由，避免覆盖或抢占现有服务。
