@@ -15,6 +15,7 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+          SSH_AUTH_SOCK: /tmp/ssh-agent.sock
         run: |
           set -euo pipefail
           install -d -m 700 "$HOME/.ssh"
@@ -22,9 +23,6 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
           eval "$(ssh-agent -a /tmp/ssh-agent.sock)"
           printf '%s\n' "$SSH_PRIVATE_KEY" | SSH_AUTH_SOCK=/tmp/ssh-agent.sock ssh-add -
-        env:
-          SSH_AUTH_SOCK: /tmp/ssh-agent.sock
-
       - name: Inspect ECS without changing it
         shell: bash
         env:
