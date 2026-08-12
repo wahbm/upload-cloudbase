@@ -130,4 +130,4 @@ jobs:
           done
           sudo -n systemctl status cloudbase-public-file-proxy.service --no-pager || true
           exit 1
-REMOTE
+          REMOTE

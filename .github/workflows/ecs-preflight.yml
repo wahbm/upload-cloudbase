@@ -68,4 +68,4 @@ jobs:
           fi
           echo '--- target service ---'
           sudo -n systemctl status cloudbase-public-file-proxy.service --no-pager 2>&1 || true
-REMOTE
+          REMOTE
